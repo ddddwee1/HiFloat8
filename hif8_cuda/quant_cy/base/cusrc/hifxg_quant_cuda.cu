@@ -117,8 +117,10 @@ __global__ void hif8_quant_cuda_kernel(const T* x_ori, T* res_ori, const int n_t
     // memory read 
     if (offset + thread_idx < n_total){
         float x = (float) x_offset[thread_idx];
-        float absx = abs(x);
-        if (absx <= (1.0f/(float)(1<<23))){
+        float absx = fabsf(x);
+        if (isnan(x) || isinf(x)){
+            res_mem[thread_idx] = x;
+        }else if (absx < exp2f(-23.0f)){
             res_mem[thread_idx] = 0;
         }else if(x<=-40960.0f){
             uint neginf_int = 0xFF800000;
@@ -130,30 +132,26 @@ __global__ void hif8_quant_cuda_kernel(const T* x_ori, T* res_ori, const int n_t
             res_mem[thread_idx] = posinf;
         }
         else{
-            uint x_int = *(uint*)&x;
-            uint exp_x = (x_int & 0x7F800000);
-            if (exp_x==0x34000000){
-                exp_x = 0x34800000;
-            }
-            
-            float exp_bias = 1.0f;  // 2**mant_bits
-            if ((exp_x<=0x47000000) && (exp_x>=0x38000000)){
-                exp_bias = 2.0f;
-            }
-            if ((exp_x<=0x43000000) && (exp_x>=0x3C000000)){
-                exp_bias = 4.0f;
-            }
-            if ((exp_x<=0x41000000) && (exp_x>=0x3E000000)){
-                exp_bias = 8.0f;
+            float e = floorf(log2f(absx));
+            if (e == -23.0f){
+                e = -22.0f;
             }
 
-            // round mantissa 
-            float exp_f = *(float*) &exp_x;
-            float mant = absx / exp_f * exp_bias;
-            mant = floor(mant + 0.5);
-            mant = mant * exp_f / exp_bias;
-            float signx = (x>=0) ? (1.0f) : (-1.0f);
-            float res = signx * mant;
+            float abs_e = fabsf(e);
+            float mant_bits = 0.0f;
+            if (abs_e <= 15.0f){
+                mant_bits = 1.0f;
+            }
+            if (abs_e <= 7.0f){
+                mant_bits = 2.0f;
+            }
+            if (abs_e <= 3.0f){
+                mant_bits = 3.0f;
+            }
+
+            float scale = exp2f(-e + mant_bits);
+            float res = floorf(absx * scale + 0.5f) * exp2f(e - mant_bits);
+            res = copysignf(res, x);
             res_mem[thread_idx] = (T) res;
         }
     }

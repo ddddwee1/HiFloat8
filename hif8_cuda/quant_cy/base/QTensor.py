@@ -10,9 +10,9 @@ from typing import Callable, Tuple, Optional, Union
 
 from .QType import QType
 try:
-    from .cusrc import lowbit_quant, hifxg_quant
-except:
-    lowbit_quant = None
+    from .cusrc import hifxg_quant
+except Exception:
+    hifxg_quant = None
 
 from .QFuncs.quant_basic import quant_py
 from .QFuncs.hifx import quant_hifx
@@ -26,13 +26,12 @@ QFUNC_MAP: Tuple[Tuple[str, Callable], ...] = ((r'^hifx[0-9]*$', quant_hifx),
                                                (r'^hif8$', quant_hif8)
                                             )
 
-if lowbit_quant is None:
-    CUDA_KERNELS = ()
-else:
-    CUDA_KERNELS: Tuple[Tuple[str, CUDA_FUNC_BUNDLE_T], ...] = (
-                (r'^hifx[0-9]*$', (hifxg_quant.hifx_quant, hifxg_quant.hifx_quant_bf16, None)),
-                (r'^hif8$', (hifxg_quant.hif8_quant, hifxg_quant.hif8_quant_bf16, hifxg_quant.hif8_quant_fp16)),
-            )
+CUDA_KERNELS_LIST = []
+if hifxg_quant is not None:
+    CUDA_KERNELS_LIST.append(
+        (r'^hif8$', (hifxg_quant.hif8_quant, hifxg_quant.hif8_quant_bf16, hifxg_quant.hif8_quant_fp16))
+    )
+CUDA_KERNELS: Tuple[Tuple[str, CUDA_FUNC_BUNDLE_T], ...] = tuple(CUDA_KERNELS_LIST)
 
 
 # cuda quant function generator 
@@ -173,4 +172,3 @@ def quant_slide_window(x: Tensor, Q: QType, force_py: bool=False, force_fp32: bo
     if qdim>0:
         qdim = qdim - len(x.shape)
     return QuantSlideWindow.apply(x, Q, force_py, force_fp32, qdim, win_size)   # type: ignore
-
