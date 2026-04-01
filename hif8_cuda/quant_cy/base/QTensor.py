@@ -10,9 +10,9 @@ from typing import Callable, Tuple, Optional, Union
 
 from .QType import QType
 try:
-    from .cusrc import hifxg_quant
+    from .cusrc import hif8_quant
 except Exception:
-    hifxg_quant = None
+    hif8_quant = None
 
 from .QFuncs.quant_basic import quant_py
 from .QFuncs.hifx import quant_hifx
@@ -27,9 +27,9 @@ QFUNC_MAP: Tuple[Tuple[str, Callable], ...] = ((r'^hifx[0-9]*$', quant_hifx),
                                             )
 
 CUDA_KERNELS_LIST = []
-if hifxg_quant is not None:
+if hif8_quant is not None:
     CUDA_KERNELS_LIST.append(
-        (r'^hif8$', (hifxg_quant.hif8_quant, hifxg_quant.hif8_quant_bf16, hifxg_quant.hif8_quant_fp16))
+        (r'^hif8$', (hif8_quant.hif8_quant, hif8_quant.hif8_quant_bf16, hif8_quant.hif8_quant_fp16))
     )
 CUDA_KERNELS: Tuple[Tuple[str, CUDA_FUNC_BUNDLE_T], ...] = tuple(CUDA_KERNELS_LIST)
 
@@ -49,14 +49,8 @@ def get_cuda_func(x: Tensor, Q: QType) -> Optional[Callable[[Tensor], Tensor]]:
             x2 = x 
             out = torch.empty_like(x, dtype=x.dtype, device=x.device)
         
-        # run quant function 
-        if Q.desc[:4]=='hifx':
-            if Q.exp_bits==0:
-                func(x2, out, Q.man_bits-1)
-            else:
-                func(x2, out, Q.man_bits+1)
-        else:
-            func(x2, out)
+        # run quant function
+        func(x2, out)
         
         # transpose back 
         if Q.q_dim!=-1 or Q.q_dim!=(len(x.shape)-1):
