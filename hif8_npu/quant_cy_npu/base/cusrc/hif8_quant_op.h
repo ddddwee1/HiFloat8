@@ -68,7 +68,15 @@ public:
         Tensor<float, PUB> out_tsr;
 
         in_empty.wait();
-        copy_gm_to_ubuf(xbuf.get(cnt).vptr(), x[n].vptr(), 0, 1, BATCH*sizeof(T)/32, 0, 0);
+        if (n+BATCH<=n2){
+            copy_gm_to_ubuf(xbuf.get(cnt).vptr(), x[n].vptr(), 0, 1, BATCH*sizeof(T)/32, 0, 0);
+        }else{
+            if constexpr(sizeof(T)==2){
+                copy_gm_to_ubuf_align_b16(xbuf.get(cnt).vptr(), x[n].vptr(), 0, 1, (n2-n)*sizeof(T), 0, 0, 0, 0);
+            }else{
+                copy_gm_to_ubuf_align_b32(xbuf.get(cnt).vptr(), x[n].vptr(), 0, 1, (n2-n)*sizeof(T), 0, 0, 0, 0);
+            }
+        }
         in_ready.set();
 
         in_ready.wait();
@@ -117,20 +125,21 @@ public:
         float expmin = *(float*) &expmin_uint;
         vmaxs(expbuf.ptr(), expbuf.ptr(), expmin, BATCH/64, 1, 1, 8, 8);
         pipe_barrier(PIPE_V);
+        // twosbuf is actually 0.5 
         vsel(expbias1.ptr(), twosbuf.ptr(), le15buf.vptr(), BATCH/64, 1, 1, 1, 8, 0, 1, 1);
         vsel(expbias2.ptr(), twosbuf.ptr(), le7buf.vptr(), BATCH/64, 1, 1, 1, 8, 0, 1, 1);
         vsel(expbias3.ptr(), twosbuf.ptr(), le3buf.vptr(), BATCH/64, 1, 1, 1, 8, 0, 1, 1);
         pipe_barrier(PIPE_V);
-        // manipulate exp 
+        // multiplies all exp to get the 2**(exp - mant_bit)
         vmul(expbias1.ptr(), expbias2.ptr(), expbias1.ptr(), BATCH/64, 1, 1, 1, 8, 8, 8);
         vmul(expbuf.ptr(), expbias3.ptr(), expbuf.ptr(), BATCH/64, 1, 1, 1, 8, 8, 8);
         pipe_barrier(PIPE_V);
         vmul(expbuf.ptr(), expbias1.ptr(), expbuf.ptr(), BATCH/64, 1, 1, 1, 8, 8, 8);
         pipe_barrier(PIPE_V);
-        // x div exp and round and mul exp 
+        // x div exp and round and mul exp (process mantissa part)
         vdiv(out_tsr.ptr(), inp_tsr.ptr(), expbuf.ptr(), BATCH/64, 1, 1, 1, 8, 8, 8);
         pipe_barrier(PIPE_V);
-        vconv_f322f32a(out_tsr.ptr(), out_tsr.ptr(), BATCH/64, 1, 1, 8, 8);
+        vconv_f322f32a(out_tsr.ptr(), out_tsr.ptr(), BATCH/64, 1, 1, 8, 8);   // round away from zero
         pipe_barrier(PIPE_V);
         set_cmpmask(zerosbuf.vptr());
         pipe_barrier(PIPE_V);
@@ -161,7 +170,15 @@ public:
         in_empty.set();
 
         out_ready.wait();
-        copy_ubuf_to_gm(out[n].vptr(), outbuf.get(cnt).vptr(), 0, 1, BATCH*sizeof(T)/32, 0, 0);
+        if (n+BATCH<=n2){
+            copy_ubuf_to_gm(out[n].vptr(), outbuf.get(cnt).vptr(), 0, 1, BATCH*sizeof(T)/32, 0, 0);
+        }else{
+            if constexpr(sizeof(T)==2){
+                copy_ubuf_to_gm_align_b16(out[n].ptr(), outbuf.get(cnt).ptr(), 0, 1, (n2-n)*sizeof(T), 0, 0, 0, 0);
+            }else{
+                copy_ubuf_to_gm_align_b32(out[n].ptr(), outbuf.get(cnt).ptr(), 0, 1, (n2-n)*sizeof(T), 0, 0, 0, 0);
+            }
+        }
         out_empty.set();
 
         cnt++;
